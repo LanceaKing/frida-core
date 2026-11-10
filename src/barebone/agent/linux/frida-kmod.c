@@ -318,10 +318,12 @@ static void frida_resolve_kernel_range (void);
 static void frida_resolve_process_ops (void);
 static void frida_resolve_code_allocator (void);
 static struct mm_struct * frida_grab_process_mm (int pid);
+#ifndef FRIDA_KERNEL_ONLY
 static struct task_struct * frida_grab_process_leader (int pid);
 static int frida_spawn_trampoline (void * data);
 static void frida_reparent_into_group (struct task_struct * leader);
 static void frida_adopt_target_context (struct task_struct * leader);
+#endif
 static void frida_remove_cloak_hooks (void);
 static int frida_show_map (struct seq_file * m, void * v);
 static int frida_show_smap (struct seq_file * m, void * v);
@@ -824,6 +826,9 @@ frida_kmod_process_spawn_thread (int pid,
                                  u64 arg,
                                  u64 tls)
 {
+#ifdef FRIDA_KERNEL_ONLY
+  return -EOPNOTSUPP;
+#else
   int tid;
   struct mm_struct * mm;
   struct task_struct * leader;
@@ -854,6 +859,7 @@ frida_kmod_process_spawn_thread (int pid,
   frida_mmput_impl (mm);
 
   return tid;
+#endif
 }
 
 int
@@ -1063,6 +1069,7 @@ frida_grab_process_mm (int pid)
   return mm;
 }
 
+#ifndef FRIDA_KERNEL_ONLY
 static struct task_struct *
 frida_grab_process_leader (int pid)
 {
@@ -1229,9 +1236,16 @@ frida_adopt_target_context (struct task_struct * leader)
 #endif
 }
 
+#endif /* !FRIDA_KERNEL_ONLY */
+
 void
 frida_kmod_install_hooks (void)
 {
+#ifdef FRIDA_KERNEL_ONLY
+  pr_info ("frida: kernel-session-only build; process injection and automatic hooks disabled\n");
+  return;
+#endif
+
   frida_op_worker = kthread_run (frida_op_worker_fn, NULL, "frida-op");
 
   frida_interceptor = gum_interceptor_obtain ();

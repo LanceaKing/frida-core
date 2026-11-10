@@ -289,3 +289,18 @@ fourteen levels of parentheses or fifteen of object literals on arm64 Linux, who
 kernel stack is 16 KiB — as is x86_64's. A script that exceeds it fails to compile rather than taking
 anything down, though the message is not always `stack overflow` — an over-deep
 `if`/`else` chain reports `expecting ';'`. Long scripts are fine; deep ones are not.
+
+## Compatibility options
+
+The default build uses the upstream process ABI. `EXTRA_CFLAGS=-DFRIDA_KERNEL_ONLY`
+keeps PID 0 kernel sessions and disables process injection and automatic hooks.
+
+`EXTRA_CFLAGS=-DFRIDA_LINUX_510_BACKPORT` selects the Android 13 arm64 process ABI
+adapter validated on Pixel 7a kernel `5.10.157-android13-4-00003-g776d0a76f6aa-ab10208116`
+(source `776d0a76f6aa7c5a92c60afbe886a8e786953199`). This is an explicit opt-in,
+not automatic detection based on the kernel version. Other vendor kernels require
+separate ABI review and runtime validation. It cannot be combined with kernel-only.
+
+The adapter preserves the official device and prctl interfaces. Shared fixes cover
+module notifier cleanup, hook rollback and drain, allocation credentials, and
+failed-injection connection cleanup. Optional process tracing is omitted.

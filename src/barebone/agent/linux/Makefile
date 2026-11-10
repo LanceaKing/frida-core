@@ -142,7 +142,7 @@ LIBC := $(AGENT_TARGET_DIR)/libc-trimmed.a
 ENTRY_POINTS := frida_agent_start frida_agent_stop \
 	gum_interceptor_obtain gum_interceptor_begin_transaction \
 	gum_interceptor_end_transaction gum_interceptor_replace \
-	gum_interceptor_revert
+	gum_interceptor_revert gum_interceptor_flush
 KEEP_GLOBAL := $(foreach s,$(ENTRY_POINTS),--keep-global-symbol=$(s))
 
 # Two structures the reparenting path reaches into lost a member upstream, and

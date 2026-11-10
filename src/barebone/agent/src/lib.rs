@@ -741,7 +741,11 @@ mod entrypoint_linux {
             crate::run_constructors();
             init_gum();
 
-            kernel::install_hooks();
+            if !kernel::install_hooks() {
+                kernel::log("frida: process hooks failed; service unavailable\n\0");
+                WORKER_EXITED.store(true, Ordering::Release);
+                return;
+            }
 
             match hostlink_chardev::Hostlink::init(Some(on_frame_from_host)) {
                 Ok(hostlink) => transport_set(Transport::CharDevice(hostlink)),

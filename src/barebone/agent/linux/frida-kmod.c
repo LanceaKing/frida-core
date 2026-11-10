@@ -1646,10 +1646,11 @@ frida_adopt_target_context (struct task_struct * leader)
 int
 frida_kmod_install_hooks (void)
 {
+  int result;
+
 #ifdef FRIDA_KERNEL_ONLY
   return 0;
 #endif
-  int result;
   frida_show_map_addr = (void *) frida_kmod_find_symbol ("show_map");
   frida_show_smap_addr = (void *) frida_kmod_find_symbol ("show_smap");
   frida_proc_fill_cache_addr = (void *) frida_kmod_find_symbol ("proc_fill_cache");

@@ -302,6 +302,7 @@ extern void gum_interceptor_revert (GumInterceptor * self, void * function_addre
 int frida_agent_start (void);
 void frida_agent_stop (void);
 
+void frida_kmod_unwatch_modules (void);
 u64 frida_kmod_find_symbol (const char * name);
 u64 frida_kmod_find_function (const char * name);
 void * frida_kmod_remap_writable (u64 first_page, unsigned int n_pages);
@@ -513,6 +514,12 @@ frida_kmod_exit (void)
 {
   frida_remove_cloak_hooks ();
   frida_agent_stop ();
+
+  /* The worker may register the notifier during startup, including before a
+   * later initialization failure. Join it first, then synchronously remove the
+   * callback before the loader frees this module's text and notifier storage.
+   */
+  frida_kmod_unwatch_modules ();
 }
 
 module_init (frida_kmod_init);

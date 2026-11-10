@@ -85,6 +85,22 @@
 # define frida_fs_unlock(fs) read_sequnlock_excl (&(fs)->seq)
 #endif
 
+/* GKI may retain these functions while removing their module exports.
+ * The original System.map supplies an offset from the exported image base.
+ * Legacy CFI has no jump-table entries for some of these unexported targets;
+ * restrict __nocfi to the glue functions that call these resolved pointers.
+ */
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+# include <asm/memory.h>
+# define FRIDA_RESOLVED_CALL __nocfi
+static typeof (&__kfifo_from_user) frida_kfifo_from_user_impl;
+static typeof (&sprint_symbol_no_offset) frida_sprint_symbol_no_offset_impl;
+static typeof (&register_module_notifier) frida_register_module_notifier_impl;
+static typeof (&unregister_module_notifier) frida_unregister_module_notifier_impl;
+#else
+# define FRIDA_RESOLVED_CALL
+#endif
+
 /* Mirrors GumPageProtection. */
 #define FRIDA_PAGE_WRITE   (1 << 1)
 #define FRIDA_PAGE_EXECUTE (1 << 2)
@@ -479,6 +495,12 @@ static int __init
 frida_kmod_init (void)
 {
   frida_resolve_kallsyms ();
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  if (frida_kallsyms_lookup_name_impl == NULL || frida_kallsyms_on_each_symbol_impl == NULL ||
+      frida_kfifo_from_user_impl == NULL || frida_sprint_symbol_no_offset_impl == NULL ||
+      frida_register_module_notifier_impl == NULL || frida_unregister_module_notifier_impl == NULL)
+    return -ENOENT;
+#endif
   frida_resolve_kernel_range ();
   frida_resolve_process_ops ();
   frida_resolve_code_allocator ();
@@ -500,10 +522,15 @@ MODULE_LICENSE ("GPL");
 MODULE_DESCRIPTION ("Frida instrumentation agent");
 MODULE_VERSION ("1.0.0");
 
-static void
+static void FRIDA_RESOLVED_CALL
 frida_resolve_kallsyms (void)
 {
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  frida_kallsyms_lookup_name_impl = (typeof (frida_kallsyms_lookup_name_impl))
+      (uintptr_t) (kimage_vaddr + FRIDA_KALLSYMS_LOOKUP_OFFSET);
+#else
   frida_kallsyms_lookup_name_impl = frida_resolve_unexported ("kallsyms_lookup_name");
+#endif
   frida_kallsyms_on_each_symbol_impl = frida_resolve_unexported ("kallsyms_on_each_symbol");
 
   if (frida_kallsyms_lookup_name_impl == NULL)
@@ -514,6 +541,12 @@ frida_resolve_kallsyms (void)
 
   frida_modules = (struct list_head *) frida_kallsyms_lookup_name_impl ("modules");
   frida_module_mutex = (struct mutex *) frida_kallsyms_lookup_name_impl ("module_mutex");
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  frida_kfifo_from_user_impl = (void *) frida_kmod_find_function ("__kfifo_from_user");
+  frida_sprint_symbol_no_offset_impl = (void *) frida_kmod_find_function ("sprint_symbol_no_offset");
+  frida_register_module_notifier_impl = (void *) frida_kmod_find_function ("register_module_notifier");
+  frida_unregister_module_notifier_impl = (void *) frida_kmod_find_function ("unregister_module_notifier");
+#endif
 
   /*
    * GKI trims its export table to the KMI symbol list, which leaves set_memory_*()
@@ -588,13 +621,19 @@ frida_resolve_code_allocator (void)
 static void *
 frida_resolve_unexported (const char * name)
 {
-  struct kprobe kp = { .symbol_name = name };
   void * address;
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  address = (void *) (uintptr_t) frida_kmod_find_symbol (name);
+  if (address == NULL)
+    return NULL;
+#else
+  struct kprobe kp = { .symbol_name = name };
 
   if (register_kprobe (&kp) < 0)
     return NULL;
   address = kp.addr;
   unregister_kprobe (&kp);
+#endif
 
   return frida_unseal_landing_pad (frida_rewind_to_function_entry (address));
 }
@@ -685,7 +724,7 @@ frida_thread_trampoline (void * data)
   return 0;
 }
 
-u64
+u64 FRIDA_RESOLVED_CALL
 frida_kmod_process_alloc (int pid,
                           u64 size,
                           int prot)
@@ -706,7 +745,7 @@ frida_kmod_process_alloc (int pid,
   return IS_ERR_VALUE (address) ? 0 : address;
 }
 
-int
+int FRIDA_RESOLVED_CALL
 frida_kmod_process_free (int pid,
                          u64 address,
                          u64 size)
@@ -727,7 +766,7 @@ frida_kmod_process_free (int pid,
   return result;
 }
 
-u64
+u64 FRIDA_RESOLVED_CALL
 frida_kmod_process_write (int pid,
                           u64 address,
                           const void * data,
@@ -749,7 +788,7 @@ frida_kmod_process_write (int pid,
   return written;
 }
 
-u64
+u64 FRIDA_RESOLVED_CALL
 frida_kmod_process_read (int pid,
                          u64 address,
                          void * data,
@@ -1003,7 +1042,7 @@ frida_kmod_cloak_remove_fd (int tgid, int fd)
   return 0;
 }
 
-static struct mm_struct *
+static struct mm_struct * FRIDA_RESOLVED_CALL
 frida_grab_process_mm (int pid)
 {
   struct mm_struct * mm;
@@ -1707,7 +1746,7 @@ frida_seq_replace_number (struct seq_file * m,
   memcpy (m->buf + num_off, tmp, nlen);
 }
 
-static struct frida_cloak *
+static struct frida_cloak * FRIDA_RESOLVED_CALL
 frida_cloak_get (pid_t tgid)
 {
   struct frida_cloak * c;
@@ -2061,7 +2100,7 @@ frida_dev_read (struct file * file,
   return (res != 0) ? res : copied;
 }
 
-static ssize_t
+static ssize_t FRIDA_RESOLVED_CALL
 frida_dev_write (struct file * file,
                  const char __user * buffer,
                  size_t size,
@@ -2071,7 +2110,11 @@ frida_dev_write (struct file * file,
   int res;
 
   mutex_lock (&frida_link_mutex);
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  res = frida_kfifo_from_user_impl (&frida_from_client.kfifo, buffer, size, &copied);
+#else
   res = kfifo_from_user (&frida_from_client, buffer, size, &copied);
+#endif
   mutex_unlock (&frida_link_mutex);
 
   if (res != 0)
@@ -2217,7 +2260,7 @@ frida_kmod_current_thread_id (void)
   return ((u64) (uintptr_t) current) & ((1ULL << 48) - 1);
 }
 
-int
+int FRIDA_RESOLVED_CALL
 frida_kmod_protect (u64 address,
                     size_t size,
                     unsigned int gum_prot)
@@ -2465,23 +2508,31 @@ frida_kmod_enumerate_module_exports (u64 base,
   return mod != NULL;
 }
 
-void
+void FRIDA_RESOLVED_CALL
 frida_kmod_watch_modules (FridaModuleEventFunc func,
                           void * user_data)
 {
   frida_kmod_module_event_func = func;
   frida_kmod_module_event_data = user_data;
 
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  frida_register_module_notifier_impl (&frida_kmod_module_notifier);
+#else
   register_module_notifier (&frida_kmod_module_notifier);
+#endif
 }
 
-void
+void FRIDA_RESOLVED_CALL
 frida_kmod_unwatch_modules (void)
 {
   if (frida_kmod_module_event_func == NULL)
     return;
 
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  frida_unregister_module_notifier_impl (&frida_kmod_module_notifier);
+#else
   unregister_module_notifier (&frida_kmod_module_notifier);
+#endif
 
   frida_kmod_module_event_func = NULL;
   frida_kmod_module_event_data = NULL;
@@ -2539,7 +2590,7 @@ frida_kmod_module_range (struct module * mod, u64 * base, u64 * size)
 #endif
 }
 
-static int
+static int FRIDA_RESOLVED_CALL
 frida_kmod_on_module_state (struct notifier_block * nb, unsigned long action, void * data)
 {
   struct module * mod = data;
@@ -2564,7 +2615,7 @@ frida_kmod_on_module_state (struct notifier_block * nb, unsigned long action, vo
   return NOTIFY_DONE;
 }
 
-u64
+u64 FRIDA_RESOLVED_CALL
 frida_kmod_find_symbol (const char * name)
 {
   if (frida_kallsyms_lookup_name_impl == NULL)
@@ -2590,7 +2641,7 @@ frida_kmod_find_function (const char * name)
  * addresses it cannot name as a hex string, which then fails to resolve back to
  * an address, so no separate check for that case is needed.
  */
-int
+int FRIDA_RESOLVED_CALL
 frida_kmod_symbol_name_from_address (u64 address,
                                      char * buffer,
                                      size_t size,
@@ -2599,7 +2650,11 @@ frida_kmod_symbol_name_from_address (u64 address,
   char rendered[KSYM_SYMBOL_LEN];
   u64 base;
 
+#ifdef FRIDA_GKI_TRIMMED_EXPORTS
+  frida_sprint_symbol_no_offset_impl (rendered, (unsigned long) address);
+#else
   sprint_symbol_no_offset (rendered, (unsigned long) address);
+#endif
   frida_strip_module_suffix (rendered);
 
   base = frida_kmod_find_symbol (rendered);
@@ -2622,7 +2677,7 @@ frida_strip_module_suffix (char * rendered)
     *suffix = '\0';
 }
 
-int
+int FRIDA_RESOLVED_CALL
 frida_kmod_enumerate_symbols (FridaFoundSymbolFunc func,
                               void * user_data)
 {

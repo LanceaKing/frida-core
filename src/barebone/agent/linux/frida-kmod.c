@@ -486,7 +486,9 @@ static unsigned long __percpu * frida_process_counts;
 #endif
 static FridaTaskJoinGroupStopFunc frida_task_join_group_stop_impl;
 static FridaCleanupSighandFunc frida_cleanup_sighand_impl;
+#ifndef FRIDA_LINUX_510_BACKPORT
 static FridaKmemCacheFreeFunc frida_kmem_cache_free_impl;
+#endif
 static FridaPutFilesStructFunc frida_put_files_struct_impl;
 static FridaSwitchTaskNamespacesFunc frida_switch_task_namespaces_impl;
 static FridaFreeFsStructFunc frida_free_fs_struct_impl;
@@ -494,7 +496,9 @@ static FridaFreeFsStructFunc frida_free_fs_struct_impl;
 static FridaExecmemAllocRwFunc frida_execmem_alloc_rw_impl;
 static FridaExecmemFreeFunc frida_execmem_free_impl;
 #endif
+#ifndef FRIDA_LINUX_510_BACKPORT
 static struct kmem_cache ** frida_signal_cachep;
+#endif
 static rwlock_t * frida_tasklist_lock;
 
 static bool frida_process_ready;
@@ -649,7 +653,6 @@ frida_resolve_kernel_range (void)
   frida_kernel_size = end - start;
 }
 
-#ifdef FRIDA_LINUX_510_BACKPORT
 static int
 frida_resolve_process_ops (void)
 {
@@ -660,19 +663,31 @@ frida_resolve_process_ops (void)
   frida_kthread_unuse_mm_impl = (FridaKthreadUnuseMmFunc) frida_kmod_find_function ("kthread_unuse_mm");
   frida_vm_mmap_impl = (FridaVmMmapFunc) frida_kmod_find_function ("vm_mmap");
   frida_vm_munmap_impl = (FridaVmMunmapFunc) frida_kmod_find_function ("vm_munmap");
+#ifdef FRIDA_LINUX_510_BACKPORT
   frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("kernel_thread");
+#else
+  frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("user_mode_thread");
+  frida_free_pids_impl = (FridaFreePidsFunc) frida_kmod_find_function ("free_pids");
+#endif
   frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_function ("detach_pid");
   frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_function ("task_join_group_stop");
   frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_function ("__cleanup_sighand");
+#ifndef FRIDA_LINUX_510_BACKPORT
   frida_kmem_cache_free_impl = (FridaKmemCacheFreeFunc) frida_kmod_find_function ("kmem_cache_free");
+#endif
   frida_put_files_struct_impl = (FridaPutFilesStructFunc) frida_kmod_find_function ("put_files_struct");
   frida_switch_task_namespaces_impl = (FridaSwitchTaskNamespacesFunc) frida_kmod_find_function ("switch_task_namespaces");
   frida_free_fs_struct_impl = (FridaFreeFsStructFunc) frida_kmod_find_function ("free_fs_struct");
+#ifndef FRIDA_LINUX_510_BACKPORT
   frida_signal_cachep = (struct kmem_cache **) frida_kmod_find_symbol ("signal_cachep");
+#endif
   frida_tasklist_lock = (rwlock_t *) frida_kmod_find_symbol ("tasklist_lock");
-  frida_get_task_cred_impl = (void *) frida_kmod_find_function ("get_task_cred");
   frida_override_creds_impl = (void *) frida_kmod_find_function ("override_creds");
   frida_revert_creds_impl = (void *) frida_kmod_find_function ("revert_creds");
+  if (frida_override_creds_impl == NULL || frida_revert_creds_impl == NULL)
+    return -ENOENT;
+#ifdef FRIDA_LINUX_510_BACKPORT
+  frida_get_task_cred_impl = (void *) frida_kmod_find_function ("get_task_cred");
   frida_cgroup_attach_task_all_impl = (void *) frida_kmod_find_function ("cgroup_attach_task_all");
   frida_get_seccomp_filter_impl = (void *) frida_kmod_find_function ("get_seccomp_filter");
   frida_update_sctlr_el1_impl = (void *) frida_kmod_find_function ("update_sctlr_el1");
@@ -695,15 +710,11 @@ frida_resolve_process_ops (void)
   FRIDA_REQUIRE (frida_detach_pid_impl);
   FRIDA_REQUIRE (frida_task_join_group_stop_impl);
   FRIDA_REQUIRE (frida_cleanup_sighand_impl);
-  FRIDA_REQUIRE (frida_kmem_cache_free_impl);
   FRIDA_REQUIRE (frida_put_files_struct_impl);
   FRIDA_REQUIRE (frida_switch_task_namespaces_impl);
   FRIDA_REQUIRE (frida_free_fs_struct_impl);
-  FRIDA_REQUIRE (frida_signal_cachep);
   FRIDA_REQUIRE (frida_tasklist_lock);
   FRIDA_REQUIRE (frida_get_task_cred_impl);
-  FRIDA_REQUIRE (frida_override_creds_impl);
-  FRIDA_REQUIRE (frida_revert_creds_impl);
   FRIDA_REQUIRE (frida_cgroup_attach_task_all_impl);
   FRIDA_REQUIRE (frida_get_seccomp_filter_impl);
   FRIDA_REQUIRE (frida_update_sctlr_el1_impl);
@@ -713,37 +724,9 @@ frida_resolve_process_ops (void)
   FRIDA_REQUIRE (frida_free_signal_struct_impl);
   FRIDA_REQUIRE (frida_process_counts);
 #undef FRIDA_REQUIRE
-  return 0;
-}
-#else
-static int
-frida_resolve_process_ops (void)
-{
-  frida_find_task_by_vpid_impl = (FridaFindTaskByVpidFunc) frida_kmod_find_function ("find_task_by_vpid");
-  frida_get_task_mm_impl = (FridaGetTaskMmFunc) frida_kmod_find_function ("get_task_mm");
-  frida_mmput_impl = (FridaMmputFunc) frida_kmod_find_function ("mmput");
-  frida_kthread_use_mm_impl = (FridaKthreadUseMmFunc) frida_kmod_find_function ("kthread_use_mm");
-  frida_kthread_unuse_mm_impl = (FridaKthreadUnuseMmFunc) frida_kmod_find_function ("kthread_unuse_mm");
-  frida_vm_mmap_impl = (FridaVmMmapFunc) frida_kmod_find_function ("vm_mmap");
-  frida_vm_munmap_impl = (FridaVmMunmapFunc) frida_kmod_find_function ("vm_munmap");
-  frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("user_mode_thread");
-  frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_function ("detach_pid");
-  frida_free_pids_impl = (FridaFreePidsFunc) frida_kmod_find_function ("free_pids");
-  frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_function ("task_join_group_stop");
-  frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_function ("__cleanup_sighand");
-  frida_kmem_cache_free_impl = (FridaKmemCacheFreeFunc) frida_kmod_find_function ("kmem_cache_free");
-  frida_put_files_struct_impl = (FridaPutFilesStructFunc) frida_kmod_find_function ("put_files_struct");
-  frida_switch_task_namespaces_impl = (FridaSwitchTaskNamespacesFunc) frida_kmod_find_function ("switch_task_namespaces");
-  frida_free_fs_struct_impl = (FridaFreeFsStructFunc) frida_kmod_find_function ("free_fs_struct");
-  frida_signal_cachep = (struct kmem_cache **) frida_kmod_find_symbol ("signal_cachep");
-  frida_tasklist_lock = (rwlock_t *) frida_kmod_find_symbol ("tasklist_lock");
-  frida_override_creds_impl = (void *) frida_kmod_find_function ("override_creds");
-  frida_revert_creds_impl = (void *) frida_kmod_find_function ("revert_creds");
-  if (frida_override_creds_impl == NULL || frida_revert_creds_impl == NULL)
-    return -ENOENT;
-  return 0;
-}
 #endif
+  return 0;
+}
 static void
 frida_resolve_code_allocator (void)
 {
@@ -1689,23 +1672,6 @@ frida_kmod_install_hooks (void)
   {
     pr_err ("frida: missing hook symbol: proc_fdinfo_instantiate\n");
     return -ENOENT;
-  }
-  {
-    void * targets[] = {frida_show_map_addr, frida_show_smap_addr, frida_proc_fill_cache_addr, frida_sys_prctl_addr, frida_proc_pid_status_addr, frida_do_task_stat_addr, frida_release_task_addr};
-    unsigned int i;
-    for (i = 0; i != ARRAY_SIZE (targets); i++)
-    {
-      unsigned long address = (unsigned long) targets[i];
-      unsigned long first = address & PAGE_MASK;
-      unsigned int pages = (((address + 31) & PAGE_MASK) - first) / PAGE_SIZE + 1;
-      void * alias = frida_kmod_remap_writable (first, pages);
-      if (alias == NULL)
-      {
-        pr_err ("frida: cannot map hook page at index %u\n", i);
-        return -ENOMEM;
-      }
-      frida_kmod_unmap_writable (alias);
-    }
   }
   frida_op_worker = kthread_run (frida_op_worker_fn, NULL, "frida-op");
   if (IS_ERR (frida_op_worker))

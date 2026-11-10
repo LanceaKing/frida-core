@@ -158,7 +158,13 @@ FRIDA_KMOD_DEFS := \
 	$(if $(shell grep -l 'sctlr_user;' \
 		$(KDIR)/arch/$(ARCH)/include/asm/processor.h),-DFRIDA_HAVE_SCTLR_USER) \
 	$(if $(shell grep -l '^struct kernel_symbol {' \
-		$(KDIR)/kernel/module/internal.h 2>/dev/null),-DFRIDA_PRIVATE_KERNEL_SYMBOL)
+		$(KDIR)/kernel/module/internal.h 2>/dev/null),-DFRIDA_PRIVATE_KERNEL_SYMBOL) \
+	$(if $(shell grep -l 'free_pids' \
+		$(KDIR)/include/linux/pid.h),-DFRIDA_DEFERRED_DETACH_PID) \
+	$(if $(shell grep -l 'quick_threads;' \
+		$(KDIR)/include/linux/sched/signal.h),-DFRIDA_HAVE_QUICK_THREADS) \
+	$(if $(shell grep -l 'caches_clean_inval_pou' \
+		$(KDIR)/arch/$(ARCH)/include/asm/cacheflush.h),-DFRIDA_HAVE_CACHES_CLEAN_INVAL_POU)
 
 all: modules
 

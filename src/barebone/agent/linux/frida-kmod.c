@@ -155,10 +155,8 @@ typedef unsigned long (* FridaVmMmapFunc) (struct file * file, unsigned long add
     unsigned long prot, unsigned long flag, unsigned long offset);
 typedef int (* FridaVmMunmapFunc) (unsigned long start, size_t len);
 typedef pid_t (* FridaUserModeThreadFunc) (int (* fn) (void *), void * arg, unsigned long flags);
-#ifdef FRIDA_GKI_510
-typedef void (* FridaDetachPidFunc) (struct task_struct * task, enum pid_type type);
-#else
-typedef void (* FridaDetachPidFunc) (struct pid ** pids, struct task_struct * task, enum pid_type type);
+typedef typeof (&detach_pid) FridaDetachPidFunc;
+#ifdef FRIDA_DEFERRED_DETACH_PID
 typedef void (* FridaFreePidsFunc) (struct pid ** pids);
 #endif
 typedef void (* FridaTaskJoinGroupStopFunc) (struct task_struct * task);
@@ -472,7 +470,8 @@ static FridaUserModeThreadFunc frida_user_mode_thread_impl;
 static FridaDetachPidFunc frida_detach_pid_impl;
 #ifdef FRIDA_GKI_510
 static typeof (&get_task_cred) frida_get_task_cred_impl;
-#else
+#endif
+#ifdef FRIDA_DEFERRED_DETACH_PID
 static FridaFreePidsFunc frida_free_pids_impl;
 #endif
 static typeof (&override_creds) frida_override_creds_impl;
@@ -678,7 +677,15 @@ frida_resolve_process_ops (void)
   frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("kernel_thread");
 #else
   frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("user_mode_thread");
+#endif
+#ifdef FRIDA_DEFERRED_DETACH_PID
   frida_free_pids_impl = (FridaFreePidsFunc) frida_kmod_find_function ("free_pids");
+  if (frida_free_pids_impl == NULL)
+    return -ENOENT;
+#endif
+#ifndef FRIDA_KERNEL_ONLY
+  if (frida_user_mode_thread_impl == NULL)
+    return -EOPNOTSUPP;
 #endif
   frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_function ("detach_pid");
   frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_function ("task_join_group_stop");
@@ -1417,6 +1424,9 @@ frida_reparent_into_group (struct task_struct * leader)
   struct nsproxy * ns;
   int fs_dead;
   int result = -ESRCH;
+#ifdef FRIDA_DEFERRED_DETACH_PID
+  struct pid * freed[PIDTYPE_MAX] = { NULL };
+#endif
 #ifdef CONFIG_SYSVIPC
   void * undo_list;
 #endif
@@ -1459,9 +1469,15 @@ frida_reparent_into_group (struct task_struct * leader)
   rcu_assign_pointer (child->cred, get_cred (cred));
   task_unlock (child);
 
+#ifdef FRIDA_DEFERRED_DETACH_PID
+  frida_detach_pid_impl (freed, child, PIDTYPE_SID);
+  frida_detach_pid_impl (freed, child, PIDTYPE_PGID);
+  frida_detach_pid_impl (freed, child, PIDTYPE_TGID);
+#else
   frida_detach_pid_impl (child, PIDTYPE_SID);
   frida_detach_pid_impl (child, PIDTYPE_PGID);
   frida_detach_pid_impl (child, PIDTYPE_TGID);
+#endif
   list_del_rcu (&child->tasks);
   list_del_init (&child->sibling);
   list_del_rcu (&child->thread_node);
@@ -1516,6 +1532,9 @@ unlock_task:
   if (result != 0)
     return result;
 
+#ifdef FRIDA_DEFERRED_DETACH_PID
+  frida_free_pids_impl (freed);
+#endif
   frida_switch_task_namespaces_impl (child, ns);
   frida_put_files_struct_impl (old_files);
   frida_fs_lock (old_fs);
@@ -1539,13 +1558,21 @@ frida_reparent_into_group (struct task_struct * leader)
   struct task_struct * child = current;
   struct signal_struct * old_signal = child->signal;
   struct sighand_struct * old_sighand = child->sighand;
+#ifdef FRIDA_DEFERRED_DETACH_PID
   struct pid * freed[PIDTYPE_MAX] = { NULL };
+#endif
 
   write_lock_irq (frida_tasklist_lock);
 
+#ifdef FRIDA_DEFERRED_DETACH_PID
   frida_detach_pid_impl (freed, child, PIDTYPE_SID);
   frida_detach_pid_impl (freed, child, PIDTYPE_PGID);
   frida_detach_pid_impl (freed, child, PIDTYPE_TGID);
+#else
+  frida_detach_pid_impl (child, PIDTYPE_SID);
+  frida_detach_pid_impl (child, PIDTYPE_PGID);
+  frida_detach_pid_impl (child, PIDTYPE_TGID);
+#endif
 
   list_del_rcu (&child->tasks);
   list_del_init (&child->sibling);
@@ -1564,7 +1591,9 @@ frida_reparent_into_group (struct task_struct * leader)
   spin_lock (&leader->sighand->siglock);
 
   leader->signal->nr_threads++;
+#ifdef FRIDA_HAVE_QUICK_THREADS
   leader->signal->quick_threads++;
+#endif
   atomic_inc (&leader->signal->live);
   refcount_inc (&leader->signal->sigcnt);
 
@@ -1579,7 +1608,9 @@ frida_reparent_into_group (struct task_struct * leader)
 
   write_unlock_irq (frida_tasklist_lock);
 
+#ifdef FRIDA_DEFERRED_DETACH_PID
   frida_free_pids_impl (freed);
+#endif
 
   frida_cleanup_sighand_impl (old_sighand);
   if (refcount_dec_and_test (&old_signal->sigcnt))
@@ -2974,7 +3005,11 @@ frida_flush_icache_range (unsigned long start, unsigned long size)
 #ifdef CONFIG_ARM64
   /* flush_icache_range() inlines a reference to __icache_flags, which GKI does not
    * export; these two are what it would have called. */
+#ifdef FRIDA_HAVE_CACHES_CLEAN_INVAL_POU
   caches_clean_inval_pou (start, start + size);
+#else
+  __flush_icache_range (start, start + size);
+#endif
 #endif
   kick_all_cpus_sync ();
 }

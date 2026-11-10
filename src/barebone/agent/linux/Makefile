@@ -152,7 +152,11 @@ FRIDA_KMOD_DEFS := \
 	$(if $(shell grep -l 'list_head[[:space:]]*thread_group;' \
 		$(KDIR)/include/linux/sched.h),-DFRIDA_HAVE_TASK_THREAD_GROUP) \
 	$(if $(shell grep -l 'spinlock_t[[:space:]]*lock;' \
-		$(KDIR)/include/linux/fs_struct.h),-DFRIDA_HAVE_FS_STRUCT_LOCK)
+		$(KDIR)/include/linux/fs_struct.h),-DFRIDA_HAVE_FS_STRUCT_LOCK) \
+	$(if $(shell grep -l 'unsigned long[[:space:]]*tp2_value;' \
+		$(KDIR)/arch/$(ARCH)/include/asm/processor.h),-DFRIDA_HAVE_TP2_VALUE) \
+	$(if $(shell grep -l 'sctlr_user;' \
+		$(KDIR)/arch/$(ARCH)/include/asm/processor.h),-DFRIDA_HAVE_SCTLR_USER)
 
 all: modules
 
@@ -204,3 +208,11 @@ clean:
 	rm -f $(PRELINKED) $(PRELINKED).tmp $(AGENT_LIB_SOFTFLOAT) $(LIBC)
 
 .PHONY: all modules agent clean
+
+# Compile the kernel-facing C glue without building Rust or linking a module.
+# Used to check internal API compatibility against configured kernel trees.
+check-kernel-abi:
+	$(MAKE) -C $(KDIR) $(if $(KOUT),O=$(KOUT)) M=$(CURDIR) ARCH=$(ARCH) \
+		FRIDA_KMOD_DEFS="$(FRIDA_KMOD_DEFS)" frida-kmod.o
+
+.PHONY: check-kernel-abi

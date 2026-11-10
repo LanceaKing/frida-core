@@ -1,8 +1,3 @@
-/* The Android 13 5.10 process ABI adapter requires explicit opt-in.
- * A kernel version match alone does not establish vendor-kernel compatibility. */
-#if defined(FRIDA_LINUX_510_BACKPORT) && defined(FRIDA_KERNEL_ONLY)
-# error Select either the 5.10 process adapter or kernel-only mode
-#endif
 /*
  * Glue between the Rust agent and the Linux kernel it is loaded into.
  *
@@ -13,18 +8,26 @@
  * target kernel's own headers is what keeps that knowledge correct.
  */
 
-#ifdef FRIDA_LINUX_510_BACKPORT
+/* GKI 5.10 predates user_mode_thread and the deferred detach_pid ABI.
+ * Other kernel families retain the upstream implementation. */
+#include <linux/version.h>
+#if defined(CONFIG_ARM64) && !defined(FRIDA_KERNEL_ONLY) && \
+    LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) && \
+    LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
+# define FRIDA_GKI_510
+#endif
+
+#ifdef FRIDA_GKI_510
 #include <linux/cgroup.h>
 #endif
 #include <linux/cred.h>
 #include <linux/delay.h>
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
 #include <linux/pid_namespace.h>
 #include <linux/seccomp.h>
 #include <asm/mte.h>
 #include <asm/pointer_auth.h>
 
-/* This backport is selected only for the pinned Pixel 7a Android 13 build. */
 
 #endif
 #include <linux/err.h>
@@ -51,12 +54,9 @@
 #include <linux/timekeeping.h>
 #include <linux/uaccess.h>
 #include <linux/version.h>
-#ifdef FRIDA_LINUX_510_BACKPORT
-#if !defined(CONFIG_ARM64) || LINUX_VERSION_CODE != KERNEL_VERSION(5, 10, 157)
-# error This compatibility patch requires arm64 Linux 5.10.157
-#endif
+#ifdef FRIDA_GKI_510
 #ifdef CONFIG_SCHED_AUTOGROUP
-# error This backport was not reviewed with CONFIG_SCHED_AUTOGROUP
+# error GKI process injection requires CONFIG_SCHED_AUTOGROUP=n
 #endif
 #endif
 #include <linux/completion.h>
@@ -152,7 +152,7 @@ typedef unsigned long (* FridaVmMmapFunc) (struct file * file, unsigned long add
     unsigned long prot, unsigned long flag, unsigned long offset);
 typedef int (* FridaVmMunmapFunc) (unsigned long start, size_t len);
 typedef pid_t (* FridaUserModeThreadFunc) (int (* fn) (void *), void * arg, unsigned long flags);
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
 typedef void (* FridaDetachPidFunc) (struct task_struct * task, enum pid_type type);
 #else
 typedef void (* FridaDetachPidFunc) (struct pid ** pids, struct task_struct * task, enum pid_type type);
@@ -223,7 +223,7 @@ struct frida_spawn_ctx
   u64 arg;
   u64 tls;
   struct task_struct * leader;
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
   struct completion done;
   int result;
 #endif
@@ -354,7 +354,7 @@ static struct task_struct * frida_grab_process_leader (int pid);
 #ifndef FRIDA_KERNEL_ONLY
 static int frida_spawn_trampoline (void * data);
 #endif
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
 #ifndef FRIDA_KERNEL_ONLY
 static int frida_reparent_into_group (struct task_struct * leader);
 #endif
@@ -370,7 +370,7 @@ static void frida_remove_cloak_hooks (void);
 static int frida_show_map (struct seq_file * m, void * v);
 static int frida_show_smap (struct seq_file * m, void * v);
 static bool frida_proc_fill_cache (struct file * file, struct dir_context * ctx,
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
     const char * name, unsigned int len, int (* instantiate) (struct dentry *, struct task_struct *, const void *), struct task_struct * task,
 #else
     const char * name, unsigned int len, void * instantiate, struct task_struct * task,
@@ -467,18 +467,26 @@ static FridaVmMmapFunc frida_vm_mmap_impl;
 static FridaVmMunmapFunc frida_vm_munmap_impl;
 static FridaUserModeThreadFunc frida_user_mode_thread_impl;
 static FridaDetachPidFunc frida_detach_pid_impl;
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
 static typeof (&get_task_cred) frida_get_task_cred_impl;
 #else
 static FridaFreePidsFunc frida_free_pids_impl;
 #endif
 static typeof (&override_creds) frida_override_creds_impl;
 static typeof (&revert_creds) frida_revert_creds_impl;
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
+#ifdef CONFIG_CGROUPS
 static typeof (&cgroup_attach_task_all) frida_cgroup_attach_task_all_impl;
+#endif
+#ifdef CONFIG_SECCOMP
 static typeof (&get_seccomp_filter) frida_get_seccomp_filter_impl;
+#endif
+#ifdef FRIDA_HAVE_SCTLR_USER
 static typeof (&update_sctlr_el1) frida_update_sctlr_el1_impl;
+#endif
+#ifdef CONFIG_ARM64_MTE
 static typeof (&mte_thread_switch) frida_mte_thread_switch_impl;
+#endif
 static typeof (&do_exit) frida_do_exit_impl;
 static typeof (&recalc_sigpending) frida_recalc_sigpending_impl;
 static void (* frida_free_signal_struct_impl) (struct signal_struct * sig);
@@ -486,7 +494,7 @@ static unsigned long __percpu * frida_process_counts;
 #endif
 static FridaTaskJoinGroupStopFunc frida_task_join_group_stop_impl;
 static FridaCleanupSighandFunc frida_cleanup_sighand_impl;
-#ifndef FRIDA_LINUX_510_BACKPORT
+#ifndef FRIDA_GKI_510
 static FridaKmemCacheFreeFunc frida_kmem_cache_free_impl;
 #endif
 static FridaPutFilesStructFunc frida_put_files_struct_impl;
@@ -496,7 +504,7 @@ static FridaFreeFsStructFunc frida_free_fs_struct_impl;
 static FridaExecmemAllocRwFunc frida_execmem_alloc_rw_impl;
 static FridaExecmemFreeFunc frida_execmem_free_impl;
 #endif
-#ifndef FRIDA_LINUX_510_BACKPORT
+#ifndef FRIDA_GKI_510
 static struct kmem_cache ** frida_signal_cachep;
 #endif
 static rwlock_t * frida_tasklist_lock;
@@ -524,7 +532,7 @@ static void * frida_proc_fdinfo_instantiate_addr;
 static int (* frida_show_map_orig) (struct seq_file * m, void * v);
 static int (* frida_show_smap_orig) (struct seq_file * m, void * v);
 static bool (* frida_proc_fill_cache_orig) (struct file * file, struct dir_context * ctx,
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
     const char * name, unsigned int len, int (* instantiate) (struct dentry *, struct task_struct *, const void *), struct task_struct * task,
 #else
     const char * name, unsigned int len, void * instantiate, struct task_struct * task,
@@ -663,7 +671,7 @@ frida_resolve_process_ops (void)
   frida_kthread_unuse_mm_impl = (FridaKthreadUnuseMmFunc) frida_kmod_find_function ("kthread_unuse_mm");
   frida_vm_mmap_impl = (FridaVmMmapFunc) frida_kmod_find_function ("vm_mmap");
   frida_vm_munmap_impl = (FridaVmMunmapFunc) frida_kmod_find_function ("vm_munmap");
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
   frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("kernel_thread");
 #else
   frida_user_mode_thread_impl = (FridaUserModeThreadFunc) frida_kmod_find_function ("user_mode_thread");
@@ -672,13 +680,13 @@ frida_resolve_process_ops (void)
   frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_function ("detach_pid");
   frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_function ("task_join_group_stop");
   frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_function ("__cleanup_sighand");
-#ifndef FRIDA_LINUX_510_BACKPORT
+#ifndef FRIDA_GKI_510
   frida_kmem_cache_free_impl = (FridaKmemCacheFreeFunc) frida_kmod_find_function ("kmem_cache_free");
 #endif
   frida_put_files_struct_impl = (FridaPutFilesStructFunc) frida_kmod_find_function ("put_files_struct");
   frida_switch_task_namespaces_impl = (FridaSwitchTaskNamespacesFunc) frida_kmod_find_function ("switch_task_namespaces");
   frida_free_fs_struct_impl = (FridaFreeFsStructFunc) frida_kmod_find_function ("free_fs_struct");
-#ifndef FRIDA_LINUX_510_BACKPORT
+#ifndef FRIDA_GKI_510
   frida_signal_cachep = (struct kmem_cache **) frida_kmod_find_symbol ("signal_cachep");
 #endif
   frida_tasklist_lock = (rwlock_t *) frida_kmod_find_symbol ("tasklist_lock");
@@ -686,12 +694,20 @@ frida_resolve_process_ops (void)
   frida_revert_creds_impl = (void *) frida_kmod_find_function ("revert_creds");
   if (frida_override_creds_impl == NULL || frida_revert_creds_impl == NULL)
     return -ENOENT;
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
   frida_get_task_cred_impl = (void *) frida_kmod_find_function ("get_task_cred");
+#ifdef CONFIG_CGROUPS
   frida_cgroup_attach_task_all_impl = (void *) frida_kmod_find_function ("cgroup_attach_task_all");
+#endif
+#ifdef CONFIG_SECCOMP
   frida_get_seccomp_filter_impl = (void *) frida_kmod_find_function ("get_seccomp_filter");
+#endif
+#ifdef FRIDA_HAVE_SCTLR_USER
   frida_update_sctlr_el1_impl = (void *) frida_kmod_find_function ("update_sctlr_el1");
+#endif
+#ifdef CONFIG_ARM64_MTE
   frida_mte_thread_switch_impl = (void *) frida_kmod_find_function ("mte_thread_switch");
+#endif
   frida_do_exit_impl = (void *) frida_kmod_find_function ("do_exit");
   frida_recalc_sigpending_impl = (void *) frida_kmod_find_function ("recalc_sigpending");
   frida_free_signal_struct_impl = (void *) frida_kmod_find_function ("free_signal_struct");
@@ -715,10 +731,18 @@ frida_resolve_process_ops (void)
   FRIDA_REQUIRE (frida_free_fs_struct_impl);
   FRIDA_REQUIRE (frida_tasklist_lock);
   FRIDA_REQUIRE (frida_get_task_cred_impl);
+#ifdef CONFIG_CGROUPS
   FRIDA_REQUIRE (frida_cgroup_attach_task_all_impl);
+#endif
+#ifdef CONFIG_SECCOMP
   FRIDA_REQUIRE (frida_get_seccomp_filter_impl);
+#endif
+#ifdef FRIDA_HAVE_SCTLR_USER
   FRIDA_REQUIRE (frida_update_sctlr_el1_impl);
+#endif
+#ifdef CONFIG_ARM64_MTE
   FRIDA_REQUIRE (frida_mte_thread_switch_impl);
+#endif
   FRIDA_REQUIRE (frida_do_exit_impl);
   FRIDA_REQUIRE (frida_recalc_sigpending_impl);
   FRIDA_REQUIRE (frida_free_signal_struct_impl);
@@ -940,7 +964,7 @@ frida_kmod_process_read (int pid,
   return read;
 }
 
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
 int FRIDA_RESOLVED_CALL
 frida_kmod_process_spawn_thread (int pid, u64 entry, u64 stack, u64 arg, u64 tls)
 {
@@ -1273,7 +1297,7 @@ frida_grab_process_leader (int pid)
   return leader;
 }
 #endif
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
 #ifndef FRIDA_KERNEL_ONLY
 static int FRIDA_RESOLVED_CALL
 frida_spawn_trampoline (void * data)
@@ -1287,7 +1311,11 @@ frida_spawn_trampoline (void * data)
   if (current->set_child_tid != NULL || current->seccomp.mode != SECCOMP_MODE_DISABLED)
     result = -EINVAL;
   else
+#ifdef CONFIG_CGROUPS
     result = frida_cgroup_attach_task_all_impl (ctx->leader, current);
+#else
+    result = 0;
+#endif
   if (result == 0)
     result = frida_reparent_into_group (ctx->leader);
   if (result != 0)
@@ -1305,15 +1333,21 @@ frida_spawn_trampoline (void * data)
   regs->pstate = PSR_MODE_EL0t;
   regs->syscallno = NO_SYSCALL;
   current->thread.uw.tp_value = ctx->tls;
+#ifdef FRIDA_HAVE_TP2_VALUE
   current->thread.uw.tp2_value = 0;
+#endif
   write_sysreg (ctx->tls, tpidr_el0);
   write_sysreg (0, tpidrro_el0);
   force_uaccess_begin ();
 
   preempt_disable ();
   ptrauth_thread_switch_user (current);
+#ifdef CONFIG_ARM64_MTE
   frida_mte_thread_switch_impl (current);
+#endif
+#ifdef FRIDA_HAVE_SCTLR_USER
   frida_update_sctlr_el1_impl (current->thread.sctlr_user);
+#endif
   preempt_enable ();
   frida_recalc_sigpending_impl ();
 
@@ -1364,7 +1398,7 @@ frida_spawn_trampoline (void * data)
 }
 #endif
 #endif
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
 #ifndef FRIDA_KERNEL_ONLY
 static int FRIDA_RESOLVED_CALL
 frida_reparent_into_group (struct task_struct * leader)
@@ -1408,7 +1442,9 @@ frida_reparent_into_group (struct task_struct * leader)
   ns = leader->nsproxy;
   get_nsproxy (ns);
   refcount_inc (&leader->sighand->count);
+#ifdef CONFIG_SECCOMP
   frida_get_seccomp_filter_impl (leader);
+#endif
 
   task_lock (child);
   child->files = leader->files;
@@ -1455,7 +1491,9 @@ frida_reparent_into_group (struct task_struct * leader)
   child->thread.mte_ctrl = leader->thread.mte_ctrl;
   clear_thread_flag (TIF_MTE_ASYNC_FAULT);
 #endif
+#ifdef FRIDA_HAVE_SCTLR_USER
   child->thread.sctlr_user = leader->thread.sctlr_user;
+#endif
   if (test_tsk_thread_flag (leader, TIF_TAGGED_ADDR))
     set_thread_flag (TIF_TAGGED_ADDR);
   child->flags &= ~(PF_KTHREAD | PF_NOFREEZE | PF_NO_SETAFFINITY);
@@ -1818,7 +1856,7 @@ frida_proc_fill_cache (struct file * file,
                        struct dir_context * ctx,
                        const char * name,
                        unsigned int len,
-#ifdef FRIDA_LINUX_510_BACKPORT
+#ifdef FRIDA_GKI_510
                        int (* instantiate) (struct dentry *, struct task_struct *, const void *),
 #else
                        void * instantiate,

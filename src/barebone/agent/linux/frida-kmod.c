@@ -43,6 +43,9 @@
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/module.h>
+#ifdef FRIDA_PRIVATE_KERNEL_SYMBOL
+# include <kernel/module/internal.h>
+#endif
 #include <linux/moduleparam.h>
 #include <linux/nsproxy.h>
 #include <linux/poll.h>

@@ -156,7 +156,9 @@ FRIDA_KMOD_DEFS := \
 	$(if $(shell grep -l 'unsigned long[[:space:]]*tp2_value;' \
 		$(KDIR)/arch/$(ARCH)/include/asm/processor.h),-DFRIDA_HAVE_TP2_VALUE) \
 	$(if $(shell grep -l 'sctlr_user;' \
-		$(KDIR)/arch/$(ARCH)/include/asm/processor.h),-DFRIDA_HAVE_SCTLR_USER)
+		$(KDIR)/arch/$(ARCH)/include/asm/processor.h),-DFRIDA_HAVE_SCTLR_USER) \
+	$(if $(shell grep -l '^struct kernel_symbol {' \
+		$(KDIR)/kernel/module/internal.h 2>/dev/null),-DFRIDA_PRIVATE_KERNEL_SYMBOL)
 
 all: modules
 

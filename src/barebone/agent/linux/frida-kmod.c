@@ -1627,7 +1627,7 @@ frida_kmod_install_hooks (void)
 {
 #ifdef FRIDA_KERNEL_ONLY
   return 0;
-#else
+#endif
   int result;
   frida_show_map_addr = (void *) frida_kmod_find_symbol ("show_map");
   frida_show_smap_addr = (void *) frida_kmod_find_symbol ("show_smap");
@@ -1772,7 +1772,6 @@ rollback:
   gum_interceptor_end_transaction (frida_interceptor);
   frida_remove_cloak_hooks ();
   return -EINVAL;
-#endif
 }
 
 static void

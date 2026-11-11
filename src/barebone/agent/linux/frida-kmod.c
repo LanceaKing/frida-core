@@ -27,8 +27,6 @@
 #include <linux/seccomp.h>
 #include <asm/mte.h>
 #include <asm/pointer_auth.h>
-
-
 #endif
 #include <linux/err.h>
 #include <linux/fdtable.h>
@@ -56,7 +54,6 @@
 #include <linux/slab.h>
 #include <linux/timekeeping.h>
 #include <linux/uaccess.h>
-#include <linux/version.h>
 #ifdef FRIDA_GKI_510
 #ifdef CONFIG_SCHED_AUTOGROUP
 # error GKI process injection requires CONFIG_SCHED_AUTOGROUP=n
@@ -72,6 +69,7 @@
 #  define FRIDA_HAVE_EXECMEM
 # endif
 #endif
+
 #ifdef CONFIG_X86_64
 # include <asm/ibt.h>
 # include <asm/msr.h>
@@ -82,6 +80,7 @@
 # include <asm/cacheflush.h>
 # include <asm/ptrace.h>
 #endif
+
 #ifdef CONFIG_X86_64
 # define FRIDA_SYSCALL_NAME_PRCTL "__x64_sys_prctl"
 # define FRIDA_SYSCALL_ARG0(regs) ((regs)->di)
@@ -103,6 +102,7 @@
 # define FRIDA_SYSCALL_ARG3(regs) ((regs)->regs[3])
 # define FRIDA_SYSCALL_ARG4(regs) ((regs)->regs[4])
 #endif
+
 #ifdef FRIDA_HAVE_FS_STRUCT_LOCK
 # define frida_fs_lock(fs) spin_lock (&(fs)->lock)
 # define frida_fs_unlock(fs) spin_unlock (&(fs)->lock)
@@ -169,6 +169,7 @@ typedef void (* FridaFreeFsStructFunc) (struct fs_struct * fs);
 typedef void * (* FridaExecmemAllocRwFunc) (enum execmem_type type, size_t size);
 typedef void (* FridaExecmemFreeFunc) (void * ptr);
 #endif
+
 typedef struct _GumInterceptor GumInterceptor;
 
 enum frida_cloak_op
@@ -720,7 +721,6 @@ frida_resolve_process_ops (void)
   FRIDA_REQUIRE (frida_kthread_unuse_mm_impl);
   FRIDA_REQUIRE (frida_vm_mmap_impl);
   FRIDA_REQUIRE (frida_vm_munmap_impl);
-  FRIDA_REQUIRE (frida_user_mode_thread_impl);
   FRIDA_REQUIRE (frida_detach_pid_impl);
   FRIDA_REQUIRE (frida_task_join_group_stop_impl);
   FRIDA_REQUIRE (frida_cleanup_sighand_impl);
@@ -749,6 +749,7 @@ frida_resolve_process_ops (void)
 #endif
   return 0;
 }
+
 static void
 frida_resolve_code_allocator (void)
 {
@@ -799,6 +800,7 @@ frida_rewind_to_function_entry (void * address)
   if (__is_endbr (*pad))
     return pad;
 #endif
+
   return address;
 }
 
@@ -826,6 +828,7 @@ frida_unseal_landing_pad (void * address)
 
   frida_kmod_unmap_writable (alias);
 #endif
+
   return address;
 }
 
@@ -1379,6 +1382,7 @@ frida_spawn_trampoline (void * data)
   current->thread.uw.tp_value = ctx.tls;
   write_sysreg (ctx.tls, tpidr_el0);
 #endif
+
   return 0;
 }
 #endif
@@ -1589,6 +1593,7 @@ frida_reparent_into_group (struct task_struct * leader)
 
   frida_adopt_target_context (leader);
 }
+
 /*
  * user_mode_thread hands the new thread the kernel worker's fd table and credentials. The loader
  * dlopen()s the agent through /proc/<tgid>/fd/<n>, and it must reach the target's fds and pass the
@@ -1849,7 +1854,6 @@ frida_show_smap (struct seq_file * m,
 
   return frida_show_smap_orig (m, v);
 }
-
 
 static bool __nocfi
 frida_proc_fill_cache (struct file * file,
@@ -2493,6 +2497,7 @@ frida_kmod_alloc_code (size_t size)
   if (frida_execmem_alloc_rw_impl != NULL)
     return frida_execmem_alloc_rw_impl (EXECMEM_MODULE_TEXT, n_bytes);
 #endif
+
   return __vmalloc (n_bytes, GFP_KERNEL | __GFP_ZERO);
 }
 
@@ -2507,6 +2512,7 @@ frida_kmod_free_code (void * ptr,
       return;
     }
 #endif
+
   vfree (ptr);
 }
 
@@ -2961,6 +2967,7 @@ frida_is_vmalloc_or_module_addr (const void * x)
   if (address >= MODULES_VADDR && address < MODULES_END)
     return true;
 #endif
+
   return is_vmalloc_addr (x);
 }
 

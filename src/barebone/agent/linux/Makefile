@@ -145,9 +145,7 @@ ENTRY_POINTS := frida_agent_start frida_agent_stop \
 	gum_interceptor_revert gum_interceptor_flush
 KEEP_GLOBAL := $(foreach s,$(ENTRY_POINTS),--keep-global-symbol=$(s))
 
-# Two structures the reparenting path reaches into lost a member upstream, and
-# neither change announces itself as anything frida-kmod.c could test for. The
-# headers it is compiled against are the authority on both, so ask them.
+# Detect private kernel interfaces from the target headers.
 FRIDA_KMOD_DEFS := \
 	$(if $(shell grep -l 'list_head[[:space:]]*thread_group;' \
 		$(KDIR)/include/linux/sched.h),-DFRIDA_HAVE_TASK_THREAD_GROUP) \

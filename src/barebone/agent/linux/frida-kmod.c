@@ -11,7 +11,7 @@
 /* GKI 5.10 predates user_mode_thread and the deferred detach_pid ABI.
  * Other kernel families retain the upstream implementation. */
 #include <linux/version.h>
-#if defined(CONFIG_ARM64) && !defined(FRIDA_KERNEL_ONLY) && \
+#if defined(CONFIG_ARM64) && \
     LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) && \
     LINUX_VERSION_CODE < KERNEL_VERSION(5, 11, 0)
 # define FRIDA_GKI_510
@@ -349,23 +349,13 @@ static void frida_resolve_kernel_range (void);
 static int frida_resolve_process_ops (void);
 static void frida_resolve_code_allocator (void);
 static struct mm_struct * frida_grab_process_mm (int pid);
-#ifndef FRIDA_KERNEL_ONLY
 static struct task_struct * frida_grab_process_leader (int pid);
-#endif
-#ifndef FRIDA_KERNEL_ONLY
 static int frida_spawn_trampoline (void * data);
-#endif
 #ifdef FRIDA_GKI_510
-#ifndef FRIDA_KERNEL_ONLY
 static int frida_reparent_into_group (struct task_struct * leader);
-#endif
 #else
-#ifndef FRIDA_KERNEL_ONLY
 static void frida_reparent_into_group (struct task_struct * leader);
-#endif
-#ifndef FRIDA_KERNEL_ONLY
 static void frida_adopt_target_context (struct task_struct * leader);
-#endif
 #endif
 static void frida_remove_cloak_hooks (void);
 static int frida_show_map (struct seq_file * m, void * v);
@@ -683,10 +673,8 @@ frida_resolve_process_ops (void)
   if (frida_free_pids_impl == NULL)
     return -ENOENT;
 #endif
-#ifndef FRIDA_KERNEL_ONLY
   if (frida_user_mode_thread_impl == NULL)
     return -EOPNOTSUPP;
-#endif
   frida_detach_pid_impl = (FridaDetachPidFunc) frida_kmod_find_function ("detach_pid");
   frida_task_join_group_stop_impl = (FridaTaskJoinGroupStopFunc) frida_kmod_find_function ("task_join_group_stop");
   frida_cleanup_sighand_impl = (FridaCleanupSighandFunc) frida_kmod_find_function ("__cleanup_sighand");
@@ -978,9 +966,6 @@ frida_kmod_process_read (int pid,
 int FRIDA_RESOLVED_CALL
 frida_kmod_process_spawn_thread (int pid, u64 entry, u64 stack, u64 arg, u64 tls)
 {
-#ifdef FRIDA_KERNEL_ONLY
-  return -EOPNOTSUPP;
-#else
   int tid;
   struct mm_struct * mm;
   struct task_struct * leader;
@@ -1037,7 +1022,6 @@ release_leader:
   up_read (&leader->signal->exec_update_lock);
   put_task_struct (leader);
   return tid;
-#endif
 }
 #else
 int
@@ -1047,9 +1031,6 @@ frida_kmod_process_spawn_thread (int pid,
                                  u64 arg,
                                  u64 tls)
 {
-#ifdef FRIDA_KERNEL_ONLY
-  return -EOPNOTSUPP;
-#else
   int tid;
   struct mm_struct * mm;
   struct task_struct * leader;
@@ -1080,7 +1061,6 @@ frida_kmod_process_spawn_thread (int pid,
   frida_mmput_impl (mm);
 
   return tid;
-#endif
 }
 #endif
 int
@@ -1290,7 +1270,6 @@ frida_grab_process_mm (int pid)
   return mm;
 }
 
-#ifndef FRIDA_KERNEL_ONLY
 static struct task_struct * FRIDA_RESOLVED_CALL
 frida_grab_process_leader (int pid)
 {
@@ -1306,9 +1285,7 @@ frida_grab_process_leader (int pid)
 
   return leader;
 }
-#endif
 #ifdef FRIDA_GKI_510
-#ifndef FRIDA_KERNEL_ONLY
 static int FRIDA_RESOLVED_CALL
 frida_spawn_trampoline (void * data)
 {
@@ -1366,9 +1343,7 @@ frida_spawn_trampoline (void * data)
   /* No access to ctx after completion: the creator owns and frees it. */
   return 0;
 }
-#endif
 #else
-#ifndef FRIDA_KERNEL_ONLY
 static int
 frida_spawn_trampoline (void * data)
 {
@@ -1407,9 +1382,7 @@ frida_spawn_trampoline (void * data)
   return 0;
 }
 #endif
-#endif
 #ifdef FRIDA_GKI_510
-#ifndef FRIDA_KERNEL_ONLY
 static int FRIDA_RESOLVED_CALL
 frida_reparent_into_group (struct task_struct * leader)
 {
@@ -1549,9 +1522,7 @@ unlock_task:
     frida_free_signal_struct_impl (old_signal);
   return 0;
 }
-#endif
 #else
-#ifndef FRIDA_KERNEL_ONLY
 static void
 frida_reparent_into_group (struct task_struct * leader)
 {
@@ -1618,7 +1589,6 @@ frida_reparent_into_group (struct task_struct * leader)
 
   frida_adopt_target_context (leader);
 }
-#endif
 /*
  * user_mode_thread hands the new thread the kernel worker's fd table and credentials. The loader
  * dlopen()s the agent through /proc/<tgid>/fd/<n>, and it must reach the target's fds and pass the
@@ -1626,7 +1596,6 @@ frida_reparent_into_group (struct task_struct * leader)
  * leader — along with its fs, namespaces and SysV semaphore undo list, as a real CLONE_THREAD
  * sibling would share them.
  */
-#ifndef FRIDA_KERNEL_ONLY
 static void
 frida_adopt_target_context (struct task_struct * leader)
 {
@@ -1676,15 +1645,11 @@ frida_adopt_target_context (struct task_struct * leader)
 #endif
 }
 #endif
-#endif
 int
 frida_kmod_install_hooks (void)
 {
   int result;
 
-#ifdef FRIDA_KERNEL_ONLY
-  return 0;
-#endif
   frida_show_map_addr = (void *) frida_kmod_find_symbol ("show_map");
   frida_show_smap_addr = (void *) frida_kmod_find_symbol ("show_smap");
   frida_proc_fill_cache_addr = (void *) frida_kmod_find_symbol ("proc_fill_cache");
